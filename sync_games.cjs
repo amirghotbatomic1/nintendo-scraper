@@ -83,14 +83,22 @@ const RUN_START_TIME = Date.now();
  */
 function parseBatchInput(rawText) {
     if (!rawText || typeof rawText !== 'string') return [];
-    const blocks = rawText.split(/(?:^|\n)\s*(?:---|===)\s*(?:\n|$)/g);
+    
+    // Split by block separator (--- or ===)
+    // Support separator with or without newlines (e.g. " --- " or "\n---\n")
+    const blocks = rawText.split(/\s*(?:---|===)\s*/g);
     const parsedGames = [];
 
     for (let block of blocks) {
         block = block.trim();
         if (!block) continue;
 
-        const lines = block.split('\n').map(l => l.trim()).filter(l => l.length > 0 && !l.startsWith('#'));
+        // If the block contains PAGE:, BASE:, UPDATE:, DLC: all on one line,
+        // normalize them by inserting newlines before each keyword
+        let normalizedBlock = block
+            .replace(/\s+(PAGE|URL|GAME|SITE|BASE|ROM|MAIN|UPDATE|UPD|DLC|DLCS)\s*[:=]/gi, '\n$1:');
+
+        const lines = normalizedBlock.split('\n').map(l => l.trim()).filter(l => l.length > 0 && !l.startsWith('#'));
         let pageUrl = null;
         let baseUrl = null;
         let updateUrl = null;
@@ -100,7 +108,16 @@ function parseBatchInput(rawText) {
             const m = line.match(/^([A-Za-z0-9_-]+)\s*[:=]\s*(.+)$/);
             if (m) {
                 const key = m[1].toUpperCase();
-                const val = m[2].trim();
+                let val = m[2].trim();
+                // Clean markdown link format e.g. [https://...](https://...)
+                const mdMatch = val.match(/\((https?:\/\/[^\s\)]+)\)/i);
+                if (mdMatch) {
+                    val = mdMatch[1];
+                } else {
+                    const urlMatch = val.match(/(https?:\/\/[^\s\]\)]+)/i);
+                    if (urlMatch) val = urlMatch[1];
+                }
+
                 if (key === 'PAGE' || key === 'URL' || key === 'GAME' || key === 'SITE') {
                     pageUrl = val;
                 } else if (key === 'BASE' || key === 'ROM' || key === 'MAIN') {
@@ -110,16 +127,20 @@ function parseBatchInput(rawText) {
                 } else if (key === 'DLC' || key === 'DLCS') {
                     dlcUrl = val;
                 }
-            } else if (line.startsWith('http://') || line.startsWith('https://')) {
-                // If line is just a URL
-                if (!pageUrl) {
-                    pageUrl = line;
-                } else if (!baseUrl) {
-                    baseUrl = line;
-                } else if (!updateUrl) {
-                    updateUrl = line;
-                } else if (!dlcUrl) {
-                    dlcUrl = line;
+            } else {
+                // If line contains a standalone URL
+                const urlMatch = line.match(/(https?:\/\/[^\s\]\)]+)/i);
+                if (urlMatch) {
+                    const detectedUrl = urlMatch[1];
+                    if (!pageUrl) {
+                        pageUrl = detectedUrl;
+                    } else if (!baseUrl) {
+                        baseUrl = detectedUrl;
+                    } else if (!updateUrl) {
+                        updateUrl = detectedUrl;
+                    } else if (!dlcUrl) {
+                        dlcUrl = detectedUrl;
+                    }
                 }
             }
         }

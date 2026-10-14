@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       batch_games:
-        description: 'Multi-Game Batch Definition (PAGE: url, BASE: url, UPDATE: url, DLC: url separated by ---)'
+        description: 'Multi-Game Batch (PAGE: url \n BASE: url \n separated by ---)'
         required: false
         type: string
       single_url:
