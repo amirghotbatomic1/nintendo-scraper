@@ -1127,12 +1127,11 @@ function getMirrorScore(url) {
                     genres: gameData.genres || ['Arcade', 'Action'],
                 },
                 uploaded_files: uploadedFiles,
+                nswpedia_url: item.nswpedia_url,
             };
 
-            if (item.id > 0) {
-                const completeRes = await apiRequest('/api/v1/games/queue/complete', 'POST', completePayload);
-                console.log(`✅ API response: ${completeRes.message || 'Complete!'}`);
-            }
+            const completeRes = await apiRequest('/api/v1/games/queue/complete', 'POST', completePayload);
+            console.log(`✅ API response: ${completeRes.message || 'Complete!'}`);
 
             console.log(`\n🎉 Queue Item #${item.id} (${gameData.title}) completed successfully with ${uploadedFiles.length} file(s)!`);
 
