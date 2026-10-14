@@ -46,6 +46,12 @@ function fetchUrl(urlStr, options = {}, retries = 4) {
 
         let cookieHeader = options.cookie || '';
 
+        const sanitizeHeader = (val) => {
+            if (!val || typeof val !== 'string') return '';
+            return val.replace(/[\r\n]+/g, ' ').replace(/[^\x20-\x7E]/g, '');
+        };
+
+        const safeReferer = sanitizeHeader(options.referer || defaultRef);
         const headers = {
             'User-Agent': USER_AGENT,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
@@ -60,7 +66,7 @@ function fetchUrl(urlStr, options = {}, retries = 4) {
             'Sec-Fetch-Site': 'none',
             'Sec-Fetch-User': '?1',
             'Upgrade-Insecure-Requests': '1',
-            'Referer': options.referer || defaultRef,
+            'Referer': safeReferer || defaultRef,
             ...options.headers
         };
 

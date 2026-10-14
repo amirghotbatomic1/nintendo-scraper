@@ -581,19 +581,54 @@ function processAndValidateRomFile(filePath, destDir) {
             return results;
         };
 
-        const candidates = findRomFiles(extractSubDir);
-        if (candidates.length === 0) {
-            throw new Error(`Archive extracted successfully but no .nsp, .xci, or .nsz file was found inside.`);
+        // Handle nested archives if needed (e.g. RAR inside RAR or ZIP inside RAR)
+        let currentExtractDir = extractSubDir;
+        let extractedRomPath = null;
+        let extractedMagic = null;
+
+        for (let depth = 0; depth < 3; depth++) {
+            const candidates = findRomFiles(currentExtractDir);
+            if (candidates.length === 0) {
+                throw new Error(`Archive extracted successfully but no ROM or archive file was found inside.`);
+            }
+
+            // Pick largest candidate file
+            candidates.sort((a, b) => fs.statSync(b).size - fs.statSync(a).size);
+            const candidatePath = candidates[0];
+            const candidateMagic = inspectFileMagicBytes(candidatePath);
+
+            if (candidateMagic.type === 'NSP' || candidateMagic.type === 'XCI') {
+                extractedRomPath = candidatePath;
+                extractedMagic = candidateMagic;
+                break;
+            }
+
+            // If the extracted candidate is itself another compressed archive (nested RAR/ZIP/7Z)
+            if (candidateMagic.type === 'RAR' || candidateMagic.type === '7Z' || candidateMagic.type === 'ZIP') {
+                console.log(`    📦 Found nested ${candidateMagic.type} archive: "${path.basename(candidatePath)}". Extracting next layer...`);
+                const nextSubDir = path.join(destDir, `extract_nested_${Date.now()}_${depth}`);
+                fs.mkdirSync(nextSubDir, { recursive: true });
+
+                try {
+                    execSync(`7z x -y -o"${nextSubDir}" "${candidatePath}"`, { stdio: 'pipe' });
+                } catch {
+                    try {
+                        execSync(`unrar x -o+ -y "${candidatePath}" "${nextSubDir}/"`, { stdio: 'pipe' });
+                    } catch (unrarErr) {
+                        throw new Error(`Failed to extract nested archive: ${unrarErr.message}`);
+                    }
+                }
+
+                try { fs.unlinkSync(candidatePath); } catch {}
+                currentExtractDir = nextSubDir;
+                continue;
+            }
+
+            throw new Error(`Extracted file (${path.basename(candidatePath)}) is not a valid Nintendo Switch ROM (${candidateMagic.description}). Signature check failed.`);
         }
 
-        // Pick largest candidate file (the main ROM)
-        candidates.sort((a, b) => fs.statSync(b).size - fs.statSync(a).size);
-        const extractedRomPath = candidates[0];
-
-        // Validate extracted ROM's magic bytes
-        const extractedMagic = inspectFileMagicBytes(extractedRomPath);
-        if (extractedMagic.type !== 'NSP' && extractedMagic.type !== 'XCI') {
-            throw new Error(`Extracted file (${path.basename(extractedRomPath)}) is not a valid Nintendo Switch ROM (${extractedMagic.description}). Signature check failed.`);
+        if (!extractedRomPath) {
+            throw new Error(`Could not find a valid Nintendo Switch ROM after extracting archive.`);
         }
 
         console.log(`    ✅ Extracted inner ROM: "${path.basename(extractedRomPath)}" (${formatBytes(fs.statSync(extractedRomPath).size)}) [${extractedMagic.type}]`);
