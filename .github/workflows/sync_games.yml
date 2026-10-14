@@ -5,20 +5,24 @@ on:
     - cron: '0 */2 * * *'
   workflow_dispatch:
     inputs:
+      batch_games:
+        description: 'Multi-Game Batch Definition (PAGE: url, BASE: url, UPDATE: url, DLC: url separated by ---)'
+        required: false
+        type: string
       single_url:
-        description: 'Game Page URL (Switch-Romz, NSWPedia, NSVault, Nintendo-ROMs)'
-        required: true
+        description: 'Single Game Page URL (Leave empty if using batch_games above)'
+        required: false
         type: string
       direct_base_url:
-        description: 'Base Game Direct Download Link (Optional - e.g. DataNodes click)'
+        description: 'Base Game Direct Download Link (For single game)'
         required: false
         type: string
       direct_update_url:
-        description: 'Update Direct Download Link (Optional - e.g. DataNodes click)'
+        description: 'Update Direct Download Link (For single game)'
         required: false
         type: string
       direct_dlc_url:
-        description: 'DLC Direct Download Link (Optional - e.g. DataNodes click)'
+        description: 'DLC Direct Download Link (For single game)'
         required: false
         type: string
 
@@ -56,12 +60,20 @@ jobs:
       - name: ⚡ Execute NSWPedia Sync Pipeline
         id: sync_step
         env:
-          SITE_URL: ${{ secrets.SITE_URL }}
-          SYNC_API_TOKEN: ${{ secrets.SYNC_API_TOKEN }}
+          SITE_URL: ${{ vars.SITE_URL || secrets.SITE_URL || 'https://ninten2.ir' }}
+          SYNC_API_TOKEN: ${{ secrets.SYNC_API_TOKEN || vars.SYNC_API_TOKEN || 'ninten2-sync-secret-key-2026' }}
           ABREHAMRAHI_REFRESH_TOKEN: ${{ secrets.ABREHAMRAHI_REFRESH_TOKEN }}
+          RAW_BATCH_INPUT: ${{ github.event.inputs.batch_games }}
         run: |
           CMD="node sync_games.cjs"
-          
+
+          if [ -n "$RAW_BATCH_INPUT" ]; then
+            printf "%s\n" "$RAW_BATCH_INPUT" > batch_games.txt
+            echo "📋 Batch definition file created with contents:"
+            cat batch_games.txt
+            CMD="$CMD --batch-file batch_games.txt"
+          fi
+
           if [ -n "${{ github.event.inputs.single_url }}" ]; then
             CMD="$CMD --single-url \"${{ github.event.inputs.single_url }}\""
           fi
@@ -78,7 +90,7 @@ jobs:
             CMD="$CMD --direct-dlc-url \"${{ github.event.inputs.direct_dlc_url }}\""
           fi
 
-          echo "Running: $CMD"
+          echo "🚀 Executing pipeline..."
           eval $CMD
 
       - name: 📋 Display Summary

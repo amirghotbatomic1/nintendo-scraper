@@ -50,11 +50,17 @@ for (let i = 0; i < args.length; i++) {
     }
 }
 
-const API_BASE_URL = (params['api-url'] || process.env.SITE_URL || process.env.APP_URL || 'https://ninten2.ir').replace(/\/$/, '');
+let rawSiteUrl = (params['api-url'] || process.env.SITE_URL || process.env.APP_URL || 'https://ninten2.ir').trim();
+if (!rawSiteUrl.startsWith('http://') && !rawSiteUrl.startsWith('https://')) {
+    rawSiteUrl = 'https://' + rawSiteUrl;
+}
+const API_BASE_URL = rawSiteUrl.replace(/\/$/, '');
 const SYNC_TOKEN = params['api-token'] || process.env.SYNC_API_TOKEN || 'ninten2-sync-secret-key-2026';
 const REFRESH_TOKEN = params['refresh-token'] || process.env.ABREHAMRAHI_REFRESH_TOKEN;
 const DEST_DIR = params['dest-dir'] || path.join(process.cwd(), 'downloads');
 const SINGLE_URL = params['single-url'] || null;
+const BATCH_FILE = params['batch-file'] || null;
+const BATCH_INPUT = params['batch-games'] || params['batch'] || process.env.BATCH_GAMES || null;
 const DIRECT_ROM_URL = params['direct-rom-url'] || params['direct-url'] || null;
 const DIRECT_FILE_TYPE = params['file-type'] || 'Base Game';
 const DIRECT_BASE_URL = params['direct-base-url'] || null;
@@ -64,8 +70,74 @@ const ZIP_PASSWORD = params['zip-password'] || process.env.ZIP_PASSWORD || 'nint
 const PART_SIZE_MB = parseInt(params['part-size-mb'] || '950', 10) || 950; // 950MB parts (AbreHamrahi storage safe limit)
 const BATCH_LIMIT = parseInt(params['limit'] || '50', 10) || 50;
 const FORCE_REUPLOAD = params['force-reupload'] === true || params['force'] === true || process.env.FORCE_REUPLOAD === 'true';
-const MAX_RUN_MINUTES = parseInt(params['max-time-minutes'] || process.env.MAX_RUN_MINUTES || '60', 10) || 60; // Soft time limit in minutes
+const MAX_RUN_MINUTES = parseInt(params['max-time-minutes'] || process.env.MAX_RUN_MINUTES || '180', 10) || 180; // Soft time limit in minutes
 const RUN_START_TIME = Date.now();
+
+/**
+ * Parse multi-game batch text format into an array of game targets.
+ * Supported format per block (separated by --- or ===):
+ * PAGE: https://switch-romz.com/rom/...
+ * BASE: https://s1.datanodes.to/d/...
+ * UPDATE: https://s1.datanodes.to/d/...
+ * DLC: https://s1.datanodes.to/d/...
+ */
+function parseBatchInput(rawText) {
+    if (!rawText || typeof rawText !== 'string') return [];
+    const blocks = rawText.split(/(?:^|\n)\s*(?:---|===)\s*(?:\n|$)/g);
+    const parsedGames = [];
+
+    for (let block of blocks) {
+        block = block.trim();
+        if (!block) continue;
+
+        const lines = block.split('\n').map(l => l.trim()).filter(l => l.length > 0 && !l.startsWith('#'));
+        let pageUrl = null;
+        let baseUrl = null;
+        let updateUrl = null;
+        let dlcUrl = null;
+
+        for (const line of lines) {
+            const m = line.match(/^([A-Za-z0-9_-]+)\s*[:=]\s*(.+)$/);
+            if (m) {
+                const key = m[1].toUpperCase();
+                const val = m[2].trim();
+                if (key === 'PAGE' || key === 'URL' || key === 'GAME' || key === 'SITE') {
+                    pageUrl = val;
+                } else if (key === 'BASE' || key === 'ROM' || key === 'MAIN') {
+                    baseUrl = val;
+                } else if (key === 'UPDATE' || key === 'UPD') {
+                    updateUrl = val;
+                } else if (key === 'DLC' || key === 'DLCS') {
+                    dlcUrl = val;
+                }
+            } else if (line.startsWith('http://') || line.startsWith('https://')) {
+                // If line is just a URL
+                if (!pageUrl) {
+                    pageUrl = line;
+                } else if (!baseUrl) {
+                    baseUrl = line;
+                } else if (!updateUrl) {
+                    updateUrl = line;
+                } else if (!dlcUrl) {
+                    dlcUrl = line;
+                }
+            }
+        }
+
+        if (pageUrl) {
+            parsedGames.push({
+                id: 0,
+                nswpedia_url: pageUrl,
+                system_platform: 'Nintendo Switch',
+                direct_base_url: baseUrl,
+                direct_update_url: updateUrl,
+                direct_dlc_url: dlcUrl,
+            });
+        }
+    }
+
+    return parsedGames;
+}
 
 /**
  * Package and split file into 2GB password-protected parts if file exceeds 2GB (PART_SIZE_MB)
@@ -596,15 +668,32 @@ async function run() {
         fs.mkdirSync(DEST_DIR, { recursive: true });
     }
 
-    // 1. Get Pending Items from API (or use single URL)
+    // 1. Get Pending Items from API (or use batch or single URL)
     let queueItems = [];
-    if (SINGLE_URL) {
+    if (BATCH_FILE && fs.existsSync(BATCH_FILE)) {
+        try {
+            const fileContent = fs.readFileSync(BATCH_FILE, 'utf8');
+            queueItems = parseBatchInput(fileContent);
+            console.log(`📑 Loaded ${queueItems.length} game(s) from batch file: ${BATCH_FILE}`);
+        } catch (fErr) {
+            console.error(`❌ Failed to read batch file: ${fErr.message}`);
+        }
+    } else if (BATCH_INPUT) {
+        queueItems = parseBatchInput(BATCH_INPUT);
+        console.log(`📑 Loaded ${queueItems.length} game(s) from batch input.`);
+    }
+
+    if (queueItems.length === 0 && SINGLE_URL) {
         queueItems = [{
             id: 0,
             nswpedia_url: SINGLE_URL,
             system_platform: 'Nintendo Switch',
+            direct_base_url: DIRECT_BASE_URL,
+            direct_update_url: DIRECT_UPDATE_URL,
+            direct_dlc_url: DIRECT_DLC_URL,
+            direct_rom_url: DIRECT_ROM_URL,
         }];
-    } else {
+    } else if (queueItems.length === 0) {
         console.log(`📡 Checking website API for pending games to download (up to ${BATCH_LIMIT})...`);
         try {
             const res = await apiRequest(`/api/v1/games/queue/pending?limit=${BATCH_LIMIT}`);
@@ -629,7 +718,7 @@ async function run() {
 
     for (const item of queueItems) {
         console.log('---------------------------------------------------------------');
-        console.log(`🎮 Processing Queue Item #${item.id}: ${item.nswpedia_url}`);
+        console.log(`🎮 Processing Game [Queue #${item.id}]: ${item.nswpedia_url}`);
 
         // Notify API start
         if (item.id > 0) {
@@ -669,6 +758,91 @@ async function run() {
             console.log(`    Cover:     ${gameData.cover ? 'Found' : 'None'}`);
             console.log(`    Screens:   ${gameData.screenshots.length} screenshot(s) found`);
             console.log(`    Mirrors:   ${gameData.downloads.length} mirror link(s) found\n`);
+
+            // Check for per-item direct URLs or global flags
+            const itemBaseUrl = item.direct_base_url || DIRECT_BASE_URL;
+            const itemUpdateUrl = item.direct_update_url || DIRECT_UPDATE_URL;
+            const itemDlcUrl = item.direct_dlc_url || DIRECT_DLC_URL;
+            const itemRomUrl = item.direct_rom_url || DIRECT_ROM_URL;
+
+            // 4. Select candidate download files & collect all available mirrors
+            // If user provided direct resolved ROM links (Base, Update, DLC)
+            const manualItems = [];
+            if (itemBaseUrl) {
+                console.log(`    ⚡ [MANUAL BASE LINK] Using provided Base Game direct URL: ${itemBaseUrl}`);
+                manualItems.push({
+                    name: `${gameData.title} Base Game`,
+                    server: 'Manual Direct Link',
+                    type: 'Base Game',
+                    version: 'v1.0.0',
+                    size: 'Base Game',
+                    format: 'NSP',
+                    directUrl: itemBaseUrl,
+                    mirrors: [{
+                        directUrl: itemBaseUrl,
+                        server: 'Manual Direct Link',
+                        name: `${gameData.title} Base Game`,
+                        type: 'Base Game'
+                    }]
+                });
+            }
+
+            if (itemUpdateUrl) {
+                console.log(`    ⚡ [MANUAL UPDATE LINK] Using provided Update direct URL: ${itemUpdateUrl}`);
+                manualItems.push({
+                    name: `${gameData.title} Update`,
+                    server: 'Manual Direct Link',
+                    type: 'Update',
+                    version: gameData.version || 'Update',
+                    size: 'Update',
+                    format: 'NSP',
+                    directUrl: itemUpdateUrl,
+                    mirrors: [{
+                        directUrl: itemUpdateUrl,
+                        server: 'Manual Direct Link',
+                        name: `${gameData.title} Update`,
+                        type: 'Update'
+                    }]
+                });
+            }
+
+            if (itemDlcUrl) {
+                console.log(`    ⚡ [MANUAL DLC LINK] Using provided DLC direct URL: ${itemDlcUrl}`);
+                manualItems.push({
+                    name: `${gameData.title} DLC Pack`,
+                    server: 'Manual Direct Link',
+                    type: 'DLC',
+                    version: 'DLC',
+                    size: 'DLC',
+                    format: 'NSP',
+                    directUrl: itemDlcUrl,
+                    mirrors: [{
+                        directUrl: itemDlcUrl,
+                        server: 'Manual Direct Link',
+                        name: `${gameData.title} DLC Pack`,
+                        type: 'DLC'
+                    }]
+                });
+            }
+
+            if (itemRomUrl && manualItems.length === 0) {
+                console.log(`    ⚡ [MANUAL DIRECT LINK] Using provided direct download URL: ${itemRomUrl}`);
+                manualItems.push({
+                    name: `${gameData.title} ${DIRECT_FILE_TYPE}`,
+                    server: 'Manual Direct Link',
+                    type: DIRECT_FILE_TYPE,
+                    version: gameData.version || 'v1.0.0',
+                    size: gameData.file_size || 'Unknown',
+                    format: 'NSP',
+                    directUrl: itemRomUrl,
+                    mirrors: [{
+                        directUrl: itemRomUrl,
+                        server: 'Manual Direct Link',
+                        name: `${gameData.title} ${DIRECT_FILE_TYPE}`,
+                        type: DIRECT_FILE_TYPE
+                    }]
+                });
+            }
 
 /**
  * Check if a direct download URL is expired or close to expiration (AWS S3 / Cloudflare R2 Presigned URL)
@@ -713,85 +887,6 @@ function getMirrorScore(url) {
     if (u.includes('multiup.')) return 30;
     return 10;
 }
-
-            // 4. Select candidate download files & collect all available mirrors
-            // If user provided direct resolved ROM links (Base, Update, DLC)
-            const manualItems = [];
-            if (DIRECT_BASE_URL) {
-                console.log(`    ⚡ [MANUAL BASE LINK] Using provided Base Game direct URL: ${DIRECT_BASE_URL}`);
-                manualItems.push({
-                    name: `${gameData.title} Base Game`,
-                    server: 'Manual Direct Link',
-                    type: 'Base Game',
-                    version: 'v1.0.0',
-                    size: 'Base Game',
-                    format: 'NSP',
-                    directUrl: DIRECT_BASE_URL,
-                    mirrors: [{
-                        directUrl: DIRECT_BASE_URL,
-                        server: 'Manual Direct Link',
-                        name: `${gameData.title} Base Game`,
-                        type: 'Base Game'
-                    }]
-                });
-            }
-
-            if (DIRECT_UPDATE_URL) {
-                console.log(`    ⚡ [MANUAL UPDATE LINK] Using provided Update direct URL: ${DIRECT_UPDATE_URL}`);
-                manualItems.push({
-                    name: `${gameData.title} Update`,
-                    server: 'Manual Direct Link',
-                    type: 'Update',
-                    version: gameData.version || 'Update',
-                    size: 'Update',
-                    format: 'NSP',
-                    directUrl: DIRECT_UPDATE_URL,
-                    mirrors: [{
-                        directUrl: DIRECT_UPDATE_URL,
-                        server: 'Manual Direct Link',
-                        name: `${gameData.title} Update`,
-                        type: 'Update'
-                    }]
-                });
-            }
-
-            if (DIRECT_DLC_URL) {
-                console.log(`    ⚡ [MANUAL DLC LINK] Using provided DLC direct URL: ${DIRECT_DLC_URL}`);
-                manualItems.push({
-                    name: `${gameData.title} DLC Pack`,
-                    server: 'Manual Direct Link',
-                    type: 'DLC',
-                    version: 'DLC',
-                    size: 'DLC',
-                    format: 'NSP',
-                    directUrl: DIRECT_DLC_URL,
-                    mirrors: [{
-                        directUrl: DIRECT_DLC_URL,
-                        server: 'Manual Direct Link',
-                        name: `${gameData.title} DLC Pack`,
-                        type: 'DLC'
-                    }]
-                });
-            }
-
-            if (DIRECT_ROM_URL && manualItems.length === 0) {
-                console.log(`    ⚡ [MANUAL DIRECT LINK] Using provided direct download URL: ${DIRECT_ROM_URL}`);
-                manualItems.push({
-                    name: `${gameData.title} ${DIRECT_FILE_TYPE}`,
-                    server: 'Manual Direct Link',
-                    type: DIRECT_FILE_TYPE,
-                    version: gameData.version || 'v1.0.0',
-                    size: gameData.file_size || 'Unknown',
-                    format: 'NSP',
-                    directUrl: DIRECT_ROM_URL,
-                    mirrors: [{
-                        directUrl: DIRECT_ROM_URL,
-                        server: 'Manual Direct Link',
-                        name: `${gameData.title} ${DIRECT_FILE_TYPE}`,
-                        type: DIRECT_FILE_TYPE
-                    }]
-                });
-            }
 
             if (manualItems.length > 0) {
                 gameData.downloads = manualItems;
@@ -1149,6 +1244,19 @@ function getMirrorScore(url) {
                     console.error(`Failed to report error to API: ${failApiErr.message}`);
                 }
             }
+        } finally {
+            // Clean up any remaining temp files in DEST_DIR after game completes or fails
+            try {
+                const lingering = fs.readdirSync(DEST_DIR);
+                for (const lf of lingering) {
+                    try {
+                        const fullPath = path.join(DEST_DIR, lf);
+                        if (fs.statSync(fullPath).isFile()) {
+                            fs.unlinkSync(fullPath);
+                        }
+                    } catch {}
+                }
+            } catch {}
         }
 
         // Soft time limit check: Allow current game to completely finish, but don't start a new game if time exceeded
