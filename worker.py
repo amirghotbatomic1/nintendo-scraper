@@ -44,8 +44,8 @@ def download_video(url, output_dir, cookie_path=None):
     print(f"🎬 در حال دانلود ویدیو از: {target_url}")
     
     ydl_opts = {
-        # اولویت کیفیت 480p کم‌حجم و بهینه (کاهش چشمگیر حجم فایل و سرعت پخش بالا)
-        'format': 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best[height<=720][ext=mp4]/best',
+        # اولویت کیفیت حداقل 720p (یا 1080p در صورت وجود، و اگر نبود بهترین موجود)
+        'format': 'bestvideo[height>=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height>=720]+bestaudio/best[height>=720]/bestvideo+bestaudio/best',
         'outtmpl': os.path.join(output_dir, '%(id)s.%(ext)s'),
         'quiet': False,
         'no_warnings': False,
