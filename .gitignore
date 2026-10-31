@@ -1,0 +1,13 @@
+node_modules/
+downloads/
+temp_integrity_checks/
+packaged/
+downloads_emulators/
+*.log
+.DS_Store
+*/.DS_Store
+__pycache__/
+*.pyc
+videos_file_map.json
+cookies.txt
+.env

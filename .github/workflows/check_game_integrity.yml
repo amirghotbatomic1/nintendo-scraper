@@ -1,0 +1,87 @@
+name: 🛡️ Game Files Integrity Checker Worker
+
+on:
+  schedule:
+    # Run every 6 hours
+    - cron: '0 */3 * * *'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: '🔗 لینک صفحه بازی در سایت، اسلاگ (Slug) یا شناسه بازی برای بررسی تکی'
+        required: false
+        type: string
+      limit:
+        description: '📦 حداکثر تعداد بازی‌های صف برای بررسی در این اجرا'
+        required: false
+        default: '5'
+        type: string
+      force_recheck:
+        description: '⚡ بررسی مجدد بازی‌هایی که قبلاً بررسی شده‌اند (true / false)'
+        required: false
+        default: 'false'
+        type: string
+
+concurrency:
+  group: check-game-integrity-pipeline
+  cancel-in-progress: false
+
+jobs:
+  check-integrity:
+    name: 🧪 Download & Verify Archives & ROMs
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: 🧹 Free Disk Space (Maximize Runner Space ~70GB+)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 📦 Install High-Speed Download Tools & Archive Testers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y aria2 curl rar unrar p7zip-full
+
+      - name: ⚡ Execute Game Files Integrity Check
+        env:
+          SITE_URL: ${{ vars.SITE_URL || secrets.SITE_URL }}
+          SYNC_API_TOKEN: ${{ secrets.SYNC_API_TOKEN || vars.SYNC_API_TOKEN }}
+          ARCHIVE_PASSWORD: ${{ secrets.ARCHIVE_PASSWORD || vars.ARCHIVE_PASSWORD }}
+        run: |
+          CMD="node check_game_integrity.cjs"
+
+          if [ -n "${{ github.event.inputs.target }}" ]; then
+            CMD="$CMD --target \"${{ github.event.inputs.target }}\""
+          fi
+
+          if [ "${{ github.event.inputs.force_recheck }}" = "true" ]; then
+            CMD="$CMD --force-recheck"
+          fi
+
+          if [ -n "${{ github.event.inputs.limit }}" ]; then
+            CMD="$CMD --limit ${{ github.event.inputs.limit }}"
+          fi
+
+          echo "Executing: $CMD"
+          eval $CMD
+
+      - name: 📋 Display Summary
+        if: always()
+        run: |
+          echo "### 🛡️ گزارش وضعیت سلامت‌سنجی فایل‌های بازی" >> $GITHUB_STEP_SUMMARY
+          echo "- **تاریخ اجرا:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "- **وضعیت در پنل سایت:** نتایج مستقیماً در پنل مدیریت بخش 'سلامت فایل‌های بازی‌ها' ذخیره شد." >> $GITHUB_STEP_SUMMARY
