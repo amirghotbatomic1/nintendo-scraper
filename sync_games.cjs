@@ -205,7 +205,8 @@ function createProtectedParts(sourceFilePath, destDir, baseName, password = ZIP_
                 // Standard RAR multi-volume format (.part1.rar, .part2.rar, etc.)
                 // -m0 (Store mode, zero compression delay) + -p (password) + -ep1 (exclude paths) + -rr3p (3% recovery record) -y (assume yes)
                 const outputBase = path.join(destDir, `${cleanBaseName}.rar`);
-                const cmd = `rar a -v${splitSizeMb}m -m0 -rr3p -p"${password}" -ep1 -y "${outputBase}" "${sourceFilePath}"`;
+                const passArg = password ? `-p"${password}"` : '-p-';
+                const cmd = `rar a -v${splitSizeMb}m -m0 -rr3p ${passArg} -ep1 -y "${outputBase}" "${sourceFilePath}"`;
                 execSync(cmd, { stdio: 'inherit' });
 
                 const createdFiles = fs.readdirSync(destDir)
@@ -253,7 +254,8 @@ function createProtectedParts(sourceFilePath, destDir, baseName, password = ZIP_
         if (!splitSuccess && has7z) {
             // Fallback 7z
             const outputBase = path.join(destDir, `${cleanBaseName}.7z`);
-            const cmd = `7z a -v${splitSizeMb}m -mx=0 -mmt=on -p"${password}" "${outputBase}" "${sourceFilePath}"`;
+            const passArg = password ? `-p"${password}"` : '';
+            const cmd = `7z a -v${splitSizeMb}m -mx=0 -mmt=on ${passArg} "${outputBase}" "${sourceFilePath}"`.trim();
             execSync(cmd, { stdio: 'inherit' });
 
             const createdFiles = fs.readdirSync(destDir)
@@ -280,7 +282,8 @@ function createProtectedParts(sourceFilePath, destDir, baseName, password = ZIP_
         // Single part archive (under 2GB) -> use .rar or .zip
         if (hasRar) {
             const outputRar = path.join(destDir, `${cleanBaseName}.rar`);
-            const cmd = `rar a -m0 -rr3p -p"${password}" -ep1 -idq "${outputRar}" "${sourceFilePath}"`;
+            const passArg = password ? `-p"${password}"` : '-p-';
+            const cmd = `rar a -m0 -rr3p ${passArg} -ep1 -idq "${outputRar}" "${sourceFilePath}"`;
             execSync(cmd, { stdio: 'ignore' });
             const outStats = fs.statSync(outputRar);
             parts.push({
@@ -293,7 +296,8 @@ function createProtectedParts(sourceFilePath, destDir, baseName, password = ZIP_
             });
         } else if (has7z) {
             const outputZip = path.join(destDir, `${cleanBaseName}.zip`);
-            const cmd = `7z a -tzip -mx=0 -mmt=on -p"${password}" "${outputZip}" "${sourceFilePath}"`;
+            const passArg = password ? `-p"${password}"` : '';
+            const cmd = `7z a -tzip -mx=0 -mmt=on ${passArg} "${outputZip}" "${sourceFilePath}"`.trim();
             execSync(cmd, { stdio: 'ignore' });
             const outStats = fs.statSync(outputZip);
             parts.push({
@@ -308,7 +312,8 @@ function createProtectedParts(sourceFilePath, destDir, baseName, password = ZIP_
             const outputZip = path.join(destDir, `${cleanBaseName}.zip`);
             const sourceDir = path.dirname(sourceFilePath);
             const sourceBase = path.basename(sourceFilePath);
-            const cmd = `cd "${sourceDir}" && zip -q -0 -P "${password}" "${outputZip}" "${sourceBase}"`;
+            const passArg = password ? `-P "${password}"` : '';
+            const cmd = `cd "${sourceDir}" && zip -q -0 ${passArg} "${outputZip}" "${sourceBase}"`.trim();
             execSync(cmd, { stdio: 'ignore' });
             const outStats = fs.statSync(outputZip);
             parts.push({
@@ -355,7 +360,8 @@ function verifyArchiveParts(parts, password = ZIP_PASSWORD) {
         try {
             // Test archive from first part (RAR traverses through all subsequent parts .part2.rar, etc.)
             // -y (assume yes) and remove -idq to catch stderr if test fails
-            const cmd = `rar t -p"${password}" -y "${firstPath}"`;
+            const passArg = password ? `-p"${password}"` : '-p-';
+            const cmd = `rar t ${passArg} -y "${firstPath}"`;
             execSync(cmd, { stdio: 'pipe' });
             console.log(`    ✅ RAR archive integrity test PASSED (${parts.length} part(s) verified end-to-end).`);
         } catch (err) {
@@ -364,7 +370,8 @@ function verifyArchiveParts(parts, password = ZIP_PASSWORD) {
         }
     } else if (format === '7Z') {
         try {
-            const cmd = `7z t -p"${password}" -y "${firstPath}"`;
+            const passArg = password ? `-p"${password}"` : '';
+            const cmd = `7z t ${passArg} -y "${firstPath}"`.trim();
             execSync(cmd, { stdio: 'pipe' });
             console.log(`    ✅ 7Z archive integrity test PASSED (${parts.length} part(s) verified end-to-end).`);
         } catch (err) {
@@ -375,9 +382,10 @@ function verifyArchiveParts(parts, password = ZIP_PASSWORD) {
         try {
             let hasUnzip = false;
             try { execSync('which unzip', { stdio: 'ignore' }); hasUnzip = true; } catch { }
+            const passArg = password ? (hasUnzip ? `-P "${password}"` : `-p"${password}"`) : '';
             const testCmd = hasUnzip
-                ? `unzip -t -P "${password}" "${firstPath}"`
-                : `7z t -p"${password}" -y "${firstPath}"`;
+                ? `unzip -t ${passArg} "${firstPath}"`.trim()
+                : `7z t ${passArg} -y "${firstPath}"`.trim();
             execSync(testCmd, { stdio: 'pipe' });
             console.log(`    ✅ ZIP archive integrity test PASSED.`);
         } catch (err) {

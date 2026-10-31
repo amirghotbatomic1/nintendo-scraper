@@ -137,11 +137,13 @@ function createProtectedParts(sourceFilePath, destDir, baseName, password = ZIP_
 
         if (hasRar) {
             const outputBase = path.join(destDir, `${cleanBaseName}.rar`);
-            const cmd = `rar a -v${splitSizeMb}m -m0 -hp"${password}" -ep1 -y "${outputBase}" "${sourceFilePath}"`;
+            const passArg = password ? `-hp"${password}"` : '-p-';
+            const cmd = `rar a -v${splitSizeMb}m -m0 ${passArg} -ep1 -y "${outputBase}" "${sourceFilePath}"`;
             execSync(cmd, { stdio: 'pipe' });
         } else if (has7z) {
             const outputBase = path.join(destDir, `${cleanBaseName}.7z`);
-            const cmd = `7z a -v${splitSizeMb}m -p"${password}" -mhe=on "${outputBase}" "${sourceFilePath}"`;
+            const passArg = password ? `-p"${password}" -mhe=on` : '';
+            const cmd = `7z a -v${splitSizeMb}m ${passArg} "${outputBase}" "${sourceFilePath}"`.trim();
             execSync(cmd, { stdio: 'pipe' });
         }
 
@@ -168,10 +170,12 @@ function createProtectedParts(sourceFilePath, destDir, baseName, password = ZIP_
         let archivePath = path.join(destDir, `${cleanBaseName}.rar`);
 
         if (hasRar) {
-            execSync(`rar a -m0 -hp"${password}" -ep1 -y "${archivePath}" "${sourceFilePath}"`, { stdio: 'pipe' });
+            const passArg = password ? `-hp"${password}"` : '-p-';
+            execSync(`rar a -m0 ${passArg} -ep1 -y "${archivePath}" "${sourceFilePath}"`, { stdio: 'pipe' });
         } else if (has7z) {
             archivePath = path.join(destDir, `${cleanBaseName}.7z`);
-            execSync(`7z a -p"${password}" -mhe=on "${archivePath}" "${sourceFilePath}"`, { stdio: 'pipe' });
+            const passArg = password ? `-p"${password}" -mhe=on` : '';
+            execSync(`7z a ${passArg} "${archivePath}" "${sourceFilePath}"`.trim(), { stdio: 'pipe' });
         } else {
             archivePath = sourceFilePath;
         }

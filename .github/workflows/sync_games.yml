@@ -67,6 +67,7 @@ jobs:
           SITE_URL: ${{ vars.SITE_URL || secrets.SITE_URL }}
           SYNC_API_TOKEN: ${{ secrets.SYNC_API_TOKEN || vars.SYNC_API_TOKEN }}
           ABREHAMRAHI_REFRESH_TOKEN: ${{ secrets.ABREHAMRAHI_REFRESH_TOKEN }}
+          ZIP_PASSWORD: ${{ vars.ZIP_PASSWORD || secrets.ZIP_PASSWORD }}
           RAW_BATCH_INPUT: ${{ github.event.inputs.batch_games }}
         run: |
           CMD="node sync_games.cjs"
